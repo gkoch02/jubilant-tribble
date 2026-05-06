@@ -457,6 +457,100 @@ def test_live_after_hours_inverts_when_past_sunset(tmp_path, monkeypatch):
     assert inverted_black.tobytes() != normal_black.tobytes()
 
 
+def test_quiet_preview_via_cli_flag_changes_render(tmp_path):
+    """--quiet forces the quiet layout regardless of --now / sleep_hour, so
+    layout previews don't have to wait until 21:00."""
+    out_normal = tmp_path / "normal.png"
+    out_quiet = tmp_path / "quiet.png"
+    main([
+        "--config", str(EXAMPLE_CONFIG),
+        "--preview", str(out_normal),
+        "--now", "2026-04-27T12:00:00-07:00",
+    ])
+    main([
+        "--config", str(EXAMPLE_CONFIG),
+        "--quiet",
+        "--preview", str(out_quiet),
+        "--now", "2026-04-27T12:00:00-07:00",
+    ])
+    assert out_normal.read_bytes() != out_quiet.read_bytes()
+
+
+def test_live_quiet_triggers_at_sleep_hour(tmp_path, monkeypatch):
+    """Live path: a refresh at sleep_hour (21:00 in the example config) must
+    render the quiet layout — different black plane than a refresh earlier
+    in the day, since the sub line and full-mode totals are gone."""
+    cfg = tmp_path / "config.toml"
+    cfg.write_text(
+        '[kid]\n'
+        'name = "Lily"\n'
+        'born_at = 2022-09-12T03:47:00-07:00\n'
+        '[schedule]\nwake_hour = 7\nsleep_hour = 21\n'
+        '[display]\nformat = "full"\n'
+    )
+
+    from datetime import datetime as _dt
+    from datetime import timedelta as _td
+    from datetime import timezone as _tz
+    PT = _tz(_td(hours=-7))
+    monkeypatch.setattr("kidage.__main__._system_zone", lambda: PT)
+
+    class NoonDateTime(_dt):
+        @classmethod
+        def now(cls, tz=None):
+            return _dt(2026, 4, 27, 12, 0, tzinfo=tz)
+    monkeypatch.setattr("kidage.__main__.datetime", NoonDateTime)
+    noon_calls = _called_show(monkeypatch)
+    assert main(["--config", str(cfg)]) == 0
+    noon_black = noon_calls[0][0]
+
+    class SleepDateTime(_dt):
+        @classmethod
+        def now(cls, tz=None):
+            return _dt(2026, 4, 27, 21, 0, tzinfo=tz)
+    monkeypatch.setattr("kidage.__main__.datetime", SleepDateTime)
+    sleep_calls = _called_show(monkeypatch)
+    assert main(["--config", str(cfg)]) == 0
+    sleep_black = sleep_calls[0][0]
+
+    assert noon_black.tobytes() != sleep_black.tobytes()
+
+
+def test_live_quiet_does_not_trigger_before_sleep_hour(tmp_path, monkeypatch):
+    """A refresh at sleep_hour-1 must NOT engage quiet mode — only the
+    final hour does."""
+    cfg = tmp_path / "config.toml"
+    cfg.write_text(
+        '[kid]\n'
+        'name = "Lily"\n'
+        'born_at = 2022-09-12T03:47:00-07:00\n'
+        '[schedule]\nwake_hour = 7\nsleep_hour = 21\n'
+        '[display]\nformat = "full"\n'
+    )
+
+    from datetime import datetime as _dt
+    from datetime import timedelta as _td
+    from datetime import timezone as _tz
+    PT = _tz(_td(hours=-7))
+    monkeypatch.setattr("kidage.__main__._system_zone", lambda: PT)
+
+    captured = {}
+    real_render = __import__("kidage.render", fromlist=["render"]).render
+    def fake_render(*args, **kwargs):
+        captured["quiet"] = kwargs.get("quiet", False)
+        return real_render(*args, **kwargs)
+    monkeypatch.setattr("kidage.__main__.render", fake_render)
+
+    class JustBeforeSleep(_dt):
+        @classmethod
+        def now(cls, tz=None):
+            return _dt(2026, 4, 27, 20, 0, tzinfo=tz)
+    monkeypatch.setattr("kidage.__main__.datetime", JustBeforeSleep)
+    _called_show(monkeypatch)
+    assert main(["--config", str(cfg)]) == 0
+    assert captured["quiet"] is False
+
+
 def test_live_after_hours_disabled_never_inverts(tmp_path, monkeypatch):
     """A config that omits after_hours_invert must never invert, even
     past sunset — and must skip the sunset calc entirely so a

@@ -210,6 +210,7 @@ def render(
     age_format: str = "extended",
     special: str | None = None,
     after_hours: bool = False,
+    quiet: bool = False,
 ) -> tuple[Image.Image, Image.Image]:
     black = Image.new("1", (WIDTH, HEIGHT), 1)
     red = Image.new("1", (WIDTH, HEIGHT), 1)
@@ -231,7 +232,15 @@ def render(
     accent_fn(rd, hx - 14, accent_y)
     accent_fn(rd, hx + hw + 14, accent_y)
 
-    if special is not None:
+    if quiet:
+        # Last refresh before sleep_hour: the panel will freeze on this image
+        # overnight, so hide every volatile metric (days/hours sub, full-mode
+        # totals) and keep only the slow-moving years/months hero. Wins over
+        # both `special` and `age_format`.
+        hero = _hero_line(age)
+        hero_y = HERO_Y_TWO_LINE
+        sub = None
+    elif special is not None:
         # Special-day mode (birthday, milestone, ...) hijacks the hero row and
         # demotes the standard "Y years M months" phrasing to the sub line,
         # regardless of age_format. The two-line baseline is reused so the sub
@@ -274,8 +283,9 @@ def render(
 
     # `full` augments the extended layout with compact total_days /
     # total_hours readouts in the bottom corners, on the black plane so they
-    # contrast with the red footer between them.
-    if age_format == "full":
+    # contrast with the red footer between them. Skipped in quiet mode since
+    # those totals would freeze on the panel overnight.
+    if age_format == "full" and not quiet:
         totals_size = 15
         totals_font = _font(totals_size, "Regular")
         left_total = f"{age.total_days}d"

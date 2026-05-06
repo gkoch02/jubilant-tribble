@@ -106,6 +106,15 @@ def main(argv: list[str] | None = None) -> int:
             "Bypasses the sunset check; intended for layout previews."
         ),
     )
+    parser.add_argument(
+        "--quiet",
+        action="store_true",
+        help=(
+            "Force the quiet-hours layout (years/months only — hides volatile "
+            "metrics that would go stale while the panel is frozen overnight). "
+            "Bypasses the sleep_hour check; intended for layout previews."
+        ),
+    )
     parser.add_argument("-v", "--verbose", action="store_true")
     parser.add_argument("--version", action="version", version=_version_string())
     args = parser.parse_args(argv)
@@ -136,6 +145,15 @@ def main(argv: list[str] | None = None) -> int:
             now.isoformat(), now.hour, cfg.wake_hour, cfg.sleep_hour,
         )
         return 0
+
+    # Last refresh before quiet hours: the panel freezes on this image until
+    # the next morning, so suppress volatile metrics. Live path only —
+    # previews stay literal unless --quiet is passed.
+    quiet = args.quiet
+    if not quiet and args.now is None:
+        quiet = now.hour == cfg.sleep_hour
+        if quiet:
+            log.info("quiet mode: last refresh before sleep_hour=%d", cfg.sleep_hour)
 
     after_hours = args.after_hours
     if not after_hours and cfg.after_hours_invert and args.now is None:
@@ -178,6 +196,7 @@ def main(argv: list[str] | None = None) -> int:
         age_format=cfg.age_format,
         special=special,
         after_hours=after_hours,
+        quiet=quiet,
     )
 
     if args.preview is not None:
