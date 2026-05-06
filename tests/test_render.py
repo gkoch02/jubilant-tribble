@@ -521,6 +521,91 @@ def test_draw_frame_heart_uses_corner_dots_not_small_hearts():
 # ---------------------------------------------------------------------------
 
 
+# ---------------------------------------------------------------------------
+# quiet (last-refresh-before-sleep) mode
+# ---------------------------------------------------------------------------
+
+
+def test_quiet_drops_sub_line():
+    """Quiet mode hides the days/hours sub line, so the band where the sub
+    normally sits (y=68..86) loses its text ink. Constrain x to skip the
+    frame's outer hairline at x=1 and x=WIDTH-2."""
+    normal_black, _ = render("Lilah", AGE, BORN, age_format="extended")
+    quiet_black, _ = render("Lilah", AGE, BORN, age_format="extended", quiet=True)
+    sub_band = range(68, 86)
+    inner = range(20, WIDTH - 20)
+    assert _ink_x_extent(normal_black, sub_band, inner) is not None
+    assert _ink_x_extent(quiet_black, sub_band, inner) is None
+
+
+def test_quiet_keeps_hero_at_two_line_baseline():
+    """Quiet mode must keep the years/months hero at HERO_Y_TWO_LINE (y=33),
+    not recenter to HERO_Y_ONE_LINE — the user wants the hero in the same
+    spot as the daytime extended layout so the panel doesn't visually
+    shift at the daily flip into quiet hours."""
+    extended_black, _ = render("Lilah", AGE, BORN, age_format="extended")
+    quiet_black, _ = render("Lilah", AGE, BORN, age_format="extended", quiet=True)
+    ep = extended_black.load()
+    qp = quiet_black.load()
+    # Hero band is byte-identical when only the sub differs.
+    for y in range(33, 62):
+        for x in range(WIDTH):
+            assert ep[x, y] == qp[x, y], f"hero diverges at ({x}, {y})"
+
+
+def test_quiet_keeps_footer_since_date():
+    """The "since <date>" footer is static, not a stale metric — it stays."""
+    quiet_black, quiet_red = render("Lilah", AGE, BORN, quiet=True)
+    footer_band = range(HEIGHT - FRAME_PAD - 13, HEIGHT - FRAME_PAD)
+    assert _ink_x_extent(quiet_red, footer_band) is not None
+
+
+def test_quiet_drops_full_mode_corner_totals():
+    """`full` augments extended with bottom-corner total_days/total_hours
+    readouts, but those would go stale overnight — quiet must suppress them."""
+    full_black, _ = render("Lilah", AGE, BORN, age_format="full")
+    quiet_black, _ = render("Lilah", AGE, BORN, age_format="full", quiet=True)
+    footer_band = range(HEIGHT - FRAME_PAD - 13, HEIGHT - FRAME_PAD)
+    left = range(10, 60)
+    right = range(WIDTH - 60, WIDTH - 10)
+    assert _ink_x_extent(full_black, footer_band, left) is not None
+    assert _ink_x_extent(full_black, footer_band, right) is not None
+    assert _ink_x_extent(quiet_black, footer_band, left) is None
+    assert _ink_x_extent(quiet_black, footer_band, right) is None
+
+
+def test_quiet_overrides_special_day():
+    """The user picked: at sleep_hour, quiet wins over a birthday/milestone
+    hero. A birthday render in quiet mode must match a non-special quiet
+    render — the birthday string never appears."""
+    bday_quiet = render(
+        "Lilah", AGE, BORN, special="Happy 4th Birthday!", quiet=True
+    )[0].tobytes()
+    plain_quiet = render("Lilah", AGE, BORN, quiet=True)[0].tobytes()
+    assert bday_quiet == plain_quiet
+
+
+def test_quiet_overrides_age_format_days():
+    """Quiet wins over age_format too — a "days" config at sleep_hour must
+    not show the days hero (would freeze a stale "1324 days" overnight)."""
+    days_quiet = render("Lilah", AGE, BORN, age_format="days", quiet=True)[0].tobytes()
+    plain_quiet = render("Lilah", AGE, BORN, quiet=True)[0].tobytes()
+    assert days_quiet == plain_quiet
+
+
+def test_quiet_combines_with_after_hours():
+    """Quiet and after_hours are independent and must compose. At ~sunset on
+    sleep_hour, both are on; both passes should still produce a usable image
+    (red ink not masked by the inverted black plane)."""
+    inv_black, red = render("Lilah", AGE, BORN, after_hours=True, quiet=True)
+    rp = red.load()
+    bp = inv_black.load()
+    red_pixels = [(x, y) for y in range(HEIGHT) for x in range(WIDTH) if rp[x, y] == 0]
+    assert red_pixels
+    for x, y in red_pixels:
+        assert bp[x, y] == 1, f"quiet+after_hours masks red at ({x},{y})"
+
+
 @pytest.mark.parametrize("accent", ACCENTS)
 def test_after_hours_punches_black_under_red_all_accents(accent):
     """For every accent, red ink must not be masked by the inverted black plane.

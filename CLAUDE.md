@@ -116,6 +116,19 @@ the refresh entirely. `--now` previews stay literal (no surprise
 inversion); pass `--after-hours` to force the inverted look for layout
 work.
 
+**Quiet mode at sleep_hour.** The systemd timer's last refresh of the day
+lands at `cfg.sleep_hour`; after that the panel freezes overnight on
+whatever was last painted, so volatile metrics (days/hours sub line,
+`full`-mode `total_days`/`total_hours` corners) would show stale numbers
+until morning. `__main__` sets `quiet = (now.hour == cfg.sleep_hour)` on
+the live path and threads it into `render()`, which forces the hero to
+`_hero_line(age)` (years/months) at `HERO_Y_TWO_LINE` and skips the sub
+line and `full` corners. Frame, header, and the static "since …" footer
+stay. Quiet wins over both `special` (a 21:00 birthday/milestone is
+suppressed) and `age_format` (a `days` / `hours` config falls back to
+years/months for the freeze). `--now` previews stay literal; pass
+`--quiet` to force the layout for design work.
+
 **Special-day mode is a third axis on top of `age_format`.**
 `kidage.special.detect()` returns a hero override string when `now` falls
 on the kid's birthday (matching `born_at.month`/`day`, with Feb 29 → Feb
