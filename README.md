@@ -2,7 +2,7 @@
 
 [![CI](https://github.com/gkoch02/BeanClock/actions/workflows/ci.yml/badge.svg)](https://github.com/gkoch02/BeanClock/actions/workflows/ci.yml)
 
-A tiny appliance: a Raspberry Pi Zero W 2 driving a Waveshare 2.13"
+A tiny appliance: a Raspberry Pi Zero 2 W driving a Waveshare 2.13"
 black/white/red e-paper (V4) shows how old your kiddo is, broken down into
 years / months / days / hours. It refreshes once an hour during waking hours
 and rests overnight.
@@ -42,24 +42,33 @@ the age is spelled out. A spread:
   entirely.
 - Once-a-day full clear to suppress ghosting; the other ~14 daily refreshes
   go straight to `display()` for less flicker.
+- **Quiet last refresh** — the refresh at `sleep_hour` (the last one before
+  the overnight freeze) drops the volatile days/hours sub line and the
+  `full`-mode totals, so the panel doesn't sit overnight showing yesterday's
+  hour count.
 - Pure-Python, vendored Waveshare driver — no apt-time setup beyond Pillow's
   runtime libs.
 
-## Hardware
+## Bill of materials
 
-- Raspberry Pi Zero W 2 (any 64-bit Pi running Raspberry Pi OS Bookworm
-  works).
-- Waveshare 2.13" e-Paper HAT, **B/R V4** (3-color, 250×122). The HAT's pin
-  header drops directly onto the Pi's GPIO. SPI must be enabled
-  (`sudo raspi-config` → Interface Options → SPI). The installer does this
-  for you.
+| # | Part | Qty | Notes |
+| - | ---- | --- | ----- |
+| 1 | Raspberry Pi Zero 2 W | 1 | Any 64-bit Pi running Raspberry Pi OS Bookworm works; the Zero 2 W is the cheapest fit and the form factor the case/stand are sized for. |
+| 2 | Waveshare 2.13" e-Paper HAT, **B/W/R, V4** (250×122) | 1 | Three-colour panel + driver board in one. The 40-pin female header drops straight onto the Pi's GPIO — no soldering, no jumpers. Make sure it's the **V4** revision; earlier revs use a different controller and the vendored driver won't talk to them. |
+| 3 | microSD card, 8 GB or larger (Class 10 / A1) | 1 | Pi OS Lite (Bookworm or newer). 8 GB is plenty; the appliance writes almost nothing to disk. |
+| 4 | USB micro-B power supply, 5 V / ≥ 2 A | 1 | The official Pi Zero supply is fine. The Zero 2 W uses **micro-B**, not USB-C. |
+| 5 | Case / stand (optional) | 1 | Anything that exposes the panel and lets the 40-pin header seat fully on the Pi. |
+
+SPI must be enabled on the Pi — `scripts/install.sh` does that for you
+(`sudo raspi-config` → Interface Options → SPI if you'd rather do it by
+hand). No other apt packages or HATs are required.
 
 ## Quick start
 
 On a fresh Pi OS Lite SD card:
 
 ```bash
-git clone https://github.com/<you>/BeanClock.git
+git clone https://github.com/gkoch02/BeanClock.git
 cd BeanClock
 sudo timedatectl set-timezone America/Los_Angeles  # use your tz (zoneinfo, not an offset)
 sudo bash scripts/install.sh
@@ -139,7 +148,7 @@ python3 -m venv .venv
 source .venv/bin/activate
 pip install -e '.[dev]'
 
-pytest                                       # 123 tests, no panel needed
+pytest                                       # full suite is hardware-free
 python -m kidage --config config.example.toml --preview /tmp/p.png
 xdg-open /tmp/p.png                          # eyeball the layout
 ```
