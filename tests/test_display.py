@@ -117,3 +117,33 @@ def test_show_always_sleeps_last(display, fake_epd_module):
     black, red = _planes()
     display.show(black, red, today=date(2026, 4, 27))
     assert fake_epd_module.calls[-1] == "sleep"
+
+
+def test_show_today_none_defaults_to_date_today(display, fake_epd_module, tmp_path, monkeypatch):
+    """show() accepts today=None and falls back to date.today(); the
+    last-clear file should land on the real current date."""
+    fake_today = date(2026, 7, 4)
+
+    class FakeDate(date):
+        @classmethod
+        def today(cls):
+            return fake_today
+
+    monkeypatch.setattr("kidage.display.date", FakeDate)
+    black, red = _planes()
+    display.show(black, red)
+    assert (tmp_path / "last-clear").read_text() == "2026-07-04"
+
+
+def test_should_clear_when_state_file_is_empty(display, tmp_path):
+    """A truncated state file (e.g. crash mid-write) reads as empty; we want
+    the next refresh to clear, not skip — pin the defensive behavior."""
+    (tmp_path / "last-clear").write_text("")
+    assert display._should_clear_today(date(2026, 4, 27)) is True
+
+
+def test_should_clear_when_state_file_is_malformed(display, tmp_path):
+    """A state file with non-ISO content (manual edit, encoding drift) must
+    not crash _should_clear_today; it should just clear."""
+    (tmp_path / "last-clear").write_text("yesterday\n")
+    assert display._should_clear_today(date(2026, 4, 27)) is True

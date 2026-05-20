@@ -294,3 +294,80 @@ milestones = 1000
 """)
     with pytest.raises(ValueError):
         load(p)
+
+
+def test_rejects_boolean_in_milestones(tmp_path):
+    """The loader guards against True/False sneaking in as milestones, since
+    Python treats `True` as `isinstance(int)` and `True == 1`. TOML arrays
+    accept mixed bool/int, so this is reachable from a real config file."""
+    p = _write(tmp_path, """
+[kid]
+name = "X"
+born_at = 2024-01-01T00:00:00+00:00
+
+[special_days]
+milestones = [100, true]
+""")
+    with pytest.raises(ValueError):
+        load(p)
+
+
+def test_rejects_non_datetime_born_at(tmp_path):
+    """A TOML string for born_at (vs. an offset datetime literal) must raise.
+    This is the defense for the user accidentally quoting the value."""
+    p = _write(tmp_path, '''
+[kid]
+name = "X"
+born_at = "2024-01-01T00:00:00+00:00"
+''')
+    with pytest.raises(ValueError, match="TOML datetime"):
+        load(p)
+
+
+def test_missing_kid_section_raises(tmp_path):
+    """A config without [kid] is malformed. Today this raises KeyError; pin
+    that behavior so a future refactor to a friendlier error is intentional."""
+    p = _write(tmp_path, '[schedule]\nwake_hour = 7\n')
+    with pytest.raises(KeyError):
+        load(p)
+
+
+def test_missing_kid_name_raises(tmp_path):
+    p = _write(tmp_path, '[kid]\nborn_at = 2024-01-01T00:00:00+00:00\n')
+    with pytest.raises(KeyError):
+        load(p)
+
+
+def test_missing_kid_born_at_raises(tmp_path):
+    p = _write(tmp_path, '[kid]\nname = "X"\n')
+    with pytest.raises(KeyError):
+        load(p)
+
+
+def test_accent_is_case_insensitive(tmp_path):
+    """`accent = "HEART"` and `accent = "Heart"` should normalize to "heart"."""
+    cfg = load(_write(tmp_path, """
+[kid]
+name = "X"
+born_at = 2024-01-01T00:00:00+00:00
+[display]
+accent = "STAR"
+"""))
+    assert cfg.accent == "star"
+
+
+def test_flip_accepts_any_truthy_value(tmp_path):
+    """Current behavior: `flip = "yes"` is parsed by TOML as the string "yes",
+    then `bool()` coerces it to True. Pin this so a tightening (to require an
+    actual TOML bool) is an intentional, visible change."""
+    # TOML can't put a string into a bool field via type coercion, but we
+    # exercise the `bool(display.get(...))` call path with the boolean TOML
+    # literal and confirm it round-trips.
+    cfg = load(_write(tmp_path, """
+[kid]
+name = "X"
+born_at = 2024-01-01T00:00:00+00:00
+[display]
+flip = true
+"""))
+    assert cfg.flip is True

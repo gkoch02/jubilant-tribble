@@ -606,6 +606,87 @@ def test_quiet_combines_with_after_hours():
         assert bp[x, y] == 1, f"quiet+after_hours masks red at ({x},{y})"
 
 
+def test_hero_shrink_loop_stops_at_16pt_floor():
+    """The hero shrink loop bottoms out at 16pt (`hero_size > 16`). For text
+    that even 16pt can't fit, the loop should stop — not crash, not loop
+    forever. Pin the floor by rendering an overlong special and checking
+    that ink lands in the hero band (i.e. the loop exited cleanly)."""
+    overlong = "Happy 100th Birthday from Grandma and Grandpa!"
+    black, _ = render("Lilah", AGE, BORN, special=overlong)
+    # Ink in the hero band confirms we exited the shrink loop and painted
+    # something — even if the something clips the budget.
+    extent = _ink_x_extent(black, range(33, 62))
+    assert extent is not None
+
+
+def test_long_name_in_header_is_pinned_behavior():
+    """The header `{name} is` has no shrink loop — a long name will paint
+    wherever the centered string lands. Pin current behavior: a 20-char
+    name still renders ink in the header band without crashing. If a
+    future change adds shrink/clip logic, this test should be updated
+    intentionally rather than silently breaking."""
+    long_name = "Maximilian Aurelius"
+    black, red = render(long_name, AGE, BORN)
+    # Header sits at y=FRAME_PAD, ~20pt tall.
+    header_band = range(FRAME_PAD, FRAME_PAD + 20)
+    assert _ink_x_extent(red, header_band) is not None
+
+
+def test_flip_after_hours_red_plane_matches_flipped_normal():
+    """Order of operations: render() inverts the black plane first, then
+    rotates both planes together. So the red plane in (flip + after_hours)
+    must equal the red plane in plain flip — inversion only touches black."""
+    flip_only = render("Lilah", AGE, BORN, flip=True)
+    both = render("Lilah", AGE, BORN, flip=True, after_hours=True)
+    assert flip_only[1].tobytes() == both[1].tobytes()
+
+
+def test_heart_accent_omits_footer_accent_glyph():
+    """The heart theme intentionally omits the footer accent (the small
+    heart at 4px lost its shape — CLAUDE.md says so). Every other accent
+    paints a small glyph just left of the centered "since …" footer.
+    This test pins that contract by comparing the column to the left of
+    the footer text on heart vs. star: star inks it, heart doesn't.
+    """
+    _, heart_red = render("Lilah", AGE, BORN, accent="heart")
+    _, star_red = render("Lilah", AGE, BORN, accent="star")
+    # The footer accent sits at fx - 12 on the red plane, y = fy + 8.
+    # We don't know the exact fx without recomputing, but we know it lands
+    # in the bottom band's left third. Look for ink in a tight column band
+    # in the bottom strip that heart should leave blank.
+    footer_band = range(HEIGHT - FRAME_PAD - 13, HEIGHT - FRAME_PAD)
+    # Sample columns to the left of where the footer text starts — well
+    # inside the panel but outside the frame's bead rail.
+    left_of_footer = range(30, 60)
+    heart_extent = _ink_x_extent(heart_red, footer_band, left_of_footer)
+    star_extent = _ink_x_extent(star_red, footer_band, left_of_footer)
+    # Star paints a glyph in that band; heart should not.
+    assert star_extent is not None, "star should paint a footer accent glyph"
+    assert heart_extent is None, (
+        "heart should omit the footer accent glyph — small hearts lose shape "
+        "at 4px and CLAUDE.md pins this carve-out"
+    )
+
+
+def test_compose_preview_color_mapping():
+    """compose_preview maps black-plane ink to (0,0,0), red-plane ink (where
+    black is blank) to (220,30,30), and otherwise white. Verify each pixel
+    class lands on the right RGB triple."""
+    black = Image.new("1", (WIDTH, HEIGHT), 1)
+    red = Image.new("1", (WIDTH, HEIGHT), 1)
+    # Black ink at (10, 10), red ink at (20, 20), nothing at (30, 30).
+    black.putpixel((10, 10), 0)
+    red.putpixel((20, 20), 0)
+    # Overlap pixel: both planes inked — black plane wins in compose_preview.
+    black.putpixel((40, 40), 0)
+    red.putpixel((40, 40), 0)
+    out = compose_preview(black, red)
+    assert out.getpixel((10, 10)) == (0, 0, 0)
+    assert out.getpixel((20, 20)) == (220, 30, 30)
+    assert out.getpixel((30, 30)) == (255, 255, 255)
+    assert out.getpixel((40, 40)) == (0, 0, 0)
+
+
 @pytest.mark.parametrize("accent", ACCENTS)
 def test_after_hours_punches_black_under_red_all_accents(accent):
     """For every accent, red ink must not be masked by the inverted black plane.

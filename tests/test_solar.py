@@ -4,6 +4,8 @@ from kidage.solar import sun_times
 
 MDT = timezone(timedelta(hours=-6))
 MST = timezone(timedelta(hours=-7))
+AEDT = timezone(timedelta(hours=11))  # Sydney, summer (Dec)
+AEST = timezone(timedelta(hours=10))  # Sydney, winter (Jun)
 
 
 def _within(actual: datetime, expected: datetime, tolerance_seconds: int) -> bool:
@@ -69,3 +71,53 @@ def test_equator_equinox_is_roughly_twelve_hours():
     sunrise, sunset = sun_times(date(2026, 3, 20), 0.0, 0.0)
     daylight = (sunset - sunrise).total_seconds()
     assert abs(daylight - 12 * 3600) < 600  # within 10 minutes
+
+
+def test_sydney_summer_solstice():
+    """Sign-symmetry guard: a negative-only test on Boulder would let a
+    sign error in lat_rad slip through. Sydney (-33.87°) on its summer
+    solstice (Dec 21) gives sunrise ~05:43 AEDT, sunset ~20:08 AEDT
+    per NOAA. Allow 3 minutes against the simplified equation."""
+    sunrise, sunset = sun_times(date(2026, 12, 21), -33.8688, 151.2093)
+    assert _within(
+        sunrise.astimezone(AEDT),
+        datetime(2026, 12, 21, 5, 43, tzinfo=AEDT),
+        180,
+    )
+    assert _within(
+        sunset.astimezone(AEDT),
+        datetime(2026, 12, 21, 20, 8, tzinfo=AEDT),
+        180,
+    )
+
+
+def test_sydney_winter_solstice():
+    """Other extreme: Sydney on June 21. Sunrise ~07:00 AEST, sunset ~16:54
+    AEST. Catches sign errors that summer alone wouldn't surface for the
+    southern hemisphere."""
+    sunrise, sunset = sun_times(date(2026, 6, 21), -33.8688, 151.2093)
+    assert _within(
+        sunrise.astimezone(AEST),
+        datetime(2026, 6, 21, 7, 0, tzinfo=AEST),
+        180,
+    )
+    assert _within(
+        sunset.astimezone(AEST),
+        datetime(2026, 6, 21, 16, 54, tzinfo=AEST),
+        180,
+    )
+
+
+def test_antimeridian_longitudes_dont_crash():
+    """lon=±180 must produce sane, ordered (sunrise, sunset). Catches any
+    wraparound bug in the `n - lon/360` step."""
+    east = sun_times(date(2026, 4, 27), 0.0, 180.0)
+    west = sun_times(date(2026, 4, 27), 0.0, -180.0)
+    assert east is not None and west is not None
+    assert east[0].tzinfo is UTC and east[1].tzinfo is UTC
+    assert east[0] < east[1]
+    assert west[0] < west[1]
+    # ±180° is the same meridian; the two answers should be very close (within
+    # ~1 day in raw seconds, since they refer to the same physical longitude
+    # but the formula resolves day-boundaries differently at the wrap).
+    assert abs((east[1] - west[1]).total_seconds()) < 24 * 3600

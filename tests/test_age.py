@@ -95,3 +95,30 @@ def test_cross_zone_preserves_birth_instant():
     age = compute(born, now)
     assert (age.years, age.months, age.days) == (2, 0, 30)
     assert age.hours == 21
+
+
+def test_naive_now_rejected():
+    """Symmetric to test_requires_tz: a naive `now` must also raise. Otherwise
+    age math would silently mix wall-clock and tz-aware datetimes."""
+    born = datetime(2024, 1, 1, tzinfo=PT)
+    naive_now = datetime(2026, 1, 1)
+    with pytest.raises(ValueError):
+        compute(born, naive_now)
+
+
+def test_dst_fall_back_keeps_wall_clock_anniversary():
+    """Born during DST (-07:00 in summer), now in standard time (-08:00 in
+    winter). At the same wall-clock minute on a monthly anniversary the hours
+    field should be 0, not 1 — symmetric to the spring-forward test above."""
+    born = datetime(2024, 7, 1, 9, 0, tzinfo=PT).astimezone(LA)
+    now = datetime(2026, 12, 1, 9, 0, tzinfo=PST).astimezone(LA)
+    assert _calendar(compute(born, now)) == (2, 5, 0, 0)
+
+
+def test_born_equals_now_is_all_zeros():
+    """The literal birth moment: every breakdown field is 0, totals are 0."""
+    born = datetime(2026, 5, 20, 12, 0, tzinfo=PT)
+    age = compute(born, born)
+    assert _calendar(age) == (0, 0, 0, 0)
+    assert age.total_days == 0
+    assert age.total_hours == 0
