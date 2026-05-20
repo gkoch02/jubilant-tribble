@@ -5,6 +5,9 @@ __pycache__/
 *.egg-info/
 build/
 dist/
+.coverage
+htmlcov/
+coverage.xml
 
 # Local config (the installer copies config.example.toml to /etc/kidage/)
 config.toml
