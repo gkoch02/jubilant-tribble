@@ -1,7 +1,9 @@
 from datetime import datetime, timedelta, timezone
 
+import pytest
+
 from kidage.age import AgeBreakdown
-from kidage.special import detect
+from kidage.special import _ordinal, detect
 
 PT = timezone(timedelta(hours=-7))
 BORN = datetime(2022, 9, 12, 3, 47, tzinfo=PT)
@@ -118,3 +120,40 @@ def test_empty_milestones_disables_milestone_path():
     now = datetime(2025, 6, 9, 12, 0, tzinfo=PT)
     age = AgeBreakdown(2, 8, 28, 8, total_days=1000, total_hours=24008)
     assert detect(BORN, now, age, birthday=False, milestones=()) is None
+
+
+def test_birthday_true_falls_through_to_milestone_on_non_birthday():
+    """birthday=True doesn't block the milestone path on a non-birthday day —
+    the kid still gets "1000 days!" on day 1000 if it doesn't fall on Sep 12.
+    Existing tests pin this with birthday=False; this one closes the loop."""
+    now = datetime(2025, 6, 9, 12, 0, tzinfo=PT)
+    age = AgeBreakdown(2, 8, 28, 8, total_days=1000, total_hours=24008)
+    assert detect(BORN, now, age, birthday=True, milestones=MILESTONES) == "1000 days!"
+
+
+@pytest.mark.parametrize("n,expected", [
+    (1, "1st"),
+    (2, "2nd"),
+    (3, "3rd"),
+    (4, "4th"),
+    (10, "10th"),
+    (11, "11th"),
+    (12, "12th"),
+    (13, "13th"),
+    (14, "14th"),
+    (20, "20th"),
+    (21, "21st"),
+    (22, "22nd"),
+    (23, "23rd"),
+    (101, "101st"),
+    (102, "102nd"),
+    (103, "103rd"),
+    (111, "111th"),
+    (112, "112th"),
+    (113, "113th"),
+])
+def test_ordinal_direct(n, expected):
+    """The teens branch (11, 12, 13 → "th") is only reachable through
+    realistic detect() inputs at age 11–13; pin the helper directly so the
+    111/112/113 mod-100 logic is verified without waiting a century."""
+    assert _ordinal(n) == expected

@@ -599,6 +599,172 @@ def test_live_quiet_does_not_trigger_before_sleep_hour(tmp_path, monkeypatch):
     assert captured["quiet"] is False
 
 
+def test_main_passes_special_string_to_render_on_birthday(tmp_path, monkeypatch):
+    """End-to-end-ish: on the kid's birthday, main() must hand render() the
+    actual override string from detect_special(), not just *some* non-None
+    value. Image-diff tests prove the byte stream differs but a regression
+    that passed any non-None placeholder would still pass them."""
+    cfg = tmp_path / "config.toml"
+    cfg.write_text(
+        '[kid]\n'
+        'name = "Lilah"\n'
+        'born_at = 2022-09-12T03:47:00-07:00\n'
+        '[schedule]\nwake_hour = 7\nsleep_hour = 21\n'
+    )
+    captured = {}
+    real_render = __import__("kidage.render", fromlist=["render"]).render
+
+    def fake_render(*args, **kwargs):
+        captured["special"] = kwargs.get("special")
+        return real_render(*args, **kwargs)
+
+    monkeypatch.setattr("kidage.__main__.render", fake_render)
+    rc = main([
+        "--config", str(cfg),
+        "--preview", str(tmp_path / "out.png"),
+        "--now", "2026-09-12T08:00:00-07:00",
+    ])
+    assert rc == 0
+    assert captured["special"] == "Happy 4th Birthday!"
+
+
+def test_main_no_special_passes_none_to_render(tmp_path, monkeypatch):
+    """And the other side: an ordinary refresh must pass special=None, not
+    an empty string. The render() branch is `if special is not None:`, so
+    an empty string would still take the special-day code path."""
+    captured = {}
+    real_render = __import__("kidage.render", fromlist=["render"]).render
+
+    def fake_render(*args, **kwargs):
+        captured["special"] = kwargs.get("special")
+        return real_render(*args, **kwargs)
+
+    monkeypatch.setattr("kidage.__main__.render", fake_render)
+    rc = main([
+        "--config", str(EXAMPLE_CONFIG),
+        "--preview", str(tmp_path / "out.png"),
+        "--now", "2026-04-27T07:47:00-07:00",
+    ])
+    assert rc == 0
+    assert captured["special"] is None
+
+
+def test_live_polar_sun_times_none_skips_inversion(tmp_path, monkeypatch):
+    """In polar day/night, sun_times() returns None. The live path must
+    treat that as "feature off for today" — not crash, not invert."""
+    cfg = _after_hours_config(tmp_path)
+
+    from datetime import datetime as _dt
+    from datetime import timedelta as _td
+    from datetime import timezone as _tz
+
+    monkeypatch.setattr("kidage.solar.sun_times", lambda d, lat, lon: None)
+    PT = _tz(_td(hours=-7))
+    monkeypatch.setattr("kidage.__main__._system_zone", lambda: PT)
+
+    captured = {}
+    real_render = __import__("kidage.render", fromlist=["render"]).render
+
+    def fake_render(*args, **kwargs):
+        captured["after_hours"] = kwargs.get("after_hours", False)
+        return real_render(*args, **kwargs)
+
+    monkeypatch.setattr("kidage.__main__.render", fake_render)
+
+    class Evening(_dt):
+        @classmethod
+        def now(cls, tz=None):
+            return _dt(2026, 6, 21, 20, 0, tzinfo=tz)
+
+    monkeypatch.setattr("kidage.__main__.datetime", Evening)
+    _called_show(monkeypatch)
+    rc = main(["--config", str(cfg)])
+    assert rc == 0
+    assert captured["after_hours"] is False
+
+
+def test_verbose_flag_enables_debug_logging(tmp_path, monkeypatch):
+    """`-v` switches logging.basicConfig to DEBUG. Pin it so a future
+    argparse refactor that drops the flag doesn't go unnoticed."""
+    import logging
+
+    captured = {}
+
+    def fake_basic_config(**kwargs):
+        captured["level"] = kwargs.get("level")
+
+    monkeypatch.setattr("kidage.__main__.logging.basicConfig", fake_basic_config)
+    _called_show(monkeypatch)
+
+    rc = main([
+        "--config", str(EXAMPLE_CONFIG),
+        "--now", "2026-04-27T07:47:00-07:00",
+        "-v",
+    ])
+    assert rc == 0
+    assert captured["level"] == logging.DEBUG
+
+
+def test_default_logging_is_info(tmp_path, monkeypatch):
+    """Without -v, logging stays at INFO."""
+    import logging
+
+    captured = {}
+
+    def fake_basic_config(**kwargs):
+        captured["level"] = kwargs.get("level")
+
+    monkeypatch.setattr("kidage.__main__.logging.basicConfig", fake_basic_config)
+    _called_show(monkeypatch)
+
+    rc = main([
+        "--config", str(EXAMPLE_CONFIG),
+        "--now", "2026-04-27T07:47:00-07:00",
+    ])
+    assert rc == 0
+    assert captured["level"] == logging.INFO
+
+
+def test_system_zone_falls_back_when_localtime_is_a_regular_file(tmp_path, monkeypatch):
+    """Some distros ship /etc/localtime as a *copy* of the tzdata blob rather
+    than a symlink. With no /etc/timezone alongside, _system_zone must fall
+    back to UTC rather than crashing or guessing."""
+    # Regular file (not a symlink) → is_symlink() is False, marker check
+    # never runs. No /etc/timezone file. UTC fallback.
+    fake_localtime = tmp_path / "localtime"
+    fake_localtime.write_bytes(b"\x00TZif2")  # plausible tzdata header
+
+    real_path = Path
+    def fake_path(arg):
+        if arg == "/etc/localtime":
+            return fake_localtime
+        if arg == "/etc/timezone":
+            return tmp_path / "missing-timezone"
+        return real_path(arg)
+    monkeypatch.setattr("kidage.__main__.Path", fake_path)
+
+    zone = _system_zone()
+    assert isinstance(zone, ZoneInfo)
+    assert str(zone) == "UTC"
+
+
+def test_version_string_when_package_metadata_missing(tmp_path, monkeypatch):
+    """If kidage isn't actually installed (running straight out of the source
+    tree without `pip install -e .`), metadata.version raises
+    PackageNotFoundError — the version string falls back to 'unknown'."""
+    from importlib import metadata
+
+    def boom(name):
+        raise metadata.PackageNotFoundError(name)
+
+    monkeypatch.setattr("kidage.__main__.metadata.version", boom)
+    monkeypatch.setattr(
+        "kidage.__main__.VERSION_FILE_CANDIDATES", [tmp_path / "missing"]
+    )
+    s = _version_string()
+    assert s == "kidage unknown"
+
+
 def test_live_after_hours_disabled_never_inverts(tmp_path, monkeypatch):
     """A config that omits after_hours_invert must never invert, even
     past sunset — and must skip the sunset calc entirely so a
