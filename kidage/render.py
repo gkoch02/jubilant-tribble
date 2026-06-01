@@ -305,13 +305,9 @@ def render(
         # uniformly-black plane would mask out every red bead/accent. Punch
         # black back out wherever red has ink so red stays visible against
         # the new black background — the user wants black/white inverted
-        # but red preserved.
-        rp = red.load()
-        bp = inverted.load()
-        for y in range(HEIGHT):
-            for x in range(WIDTH):
-                if rp[x, y] == 0:
-                    bp[x, y] = 1
+        # but red preserved. The mask is 1 exactly where red has ink; pasting
+        # "no ink" (1) through it forces those pixels back to bare panel.
+        inverted.paste(1, mask=red.point(lambda px: 0 if px else 1))
         black = inverted
 
     if flip:
@@ -323,13 +319,9 @@ def render(
 
 def compose_preview(black: Image.Image, red: Image.Image) -> Image.Image:
     out = Image.new("RGB", (WIDTH, HEIGHT), (255, 255, 255))
-    px = out.load()
-    bp = black.load()
-    rp = red.load()
-    for y in range(HEIGHT):
-        for x in range(WIDTH):
-            if bp[x, y] == 0:
-                px[x, y] = (0, 0, 0)
-            elif rp[x, y] == 0:
-                px[x, y] = (220, 30, 30)
+    # Masks are 1 wherever a plane has ink (value 0). Paste red first, then
+    # black on top, so black wins where both planes are inked — matching the
+    # panel, where black ink sits over red.
+    out.paste((220, 30, 30), mask=red.point(lambda px: 0 if px else 1))
+    out.paste((0, 0, 0), mask=black.point(lambda px: 0 if px else 1))
     return out
